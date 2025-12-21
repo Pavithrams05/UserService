@@ -1,13 +1,17 @@
 package org.scaler.userservice.services;
 
+import org.apache.commons.lang3.RandomStringUtils;
 import org.scaler.userservice.exceptions.UnAuthorizedException;
 import org.scaler.userservice.exceptions.UserNotFoundException;
 import org.scaler.userservice.models.Token;
 import org.scaler.userservice.models.User;
 import org.scaler.userservice.repositories.TokenRepository;
 import org.scaler.userservice.repositories.UserRepository;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.Optional;
@@ -17,10 +21,12 @@ public class UserServiceImpl implements UserService {
 
     private UserRepository userRepository;
     private TokenRepository tokenRepository;
+    private BCryptPasswordEncoder passwordEncoder;
 
-    public UserServiceImpl(UserRepository userRepository, TokenRepository tokenRepository) {
+    public UserServiceImpl(UserRepository userRepository, TokenRepository tokenRepository, BCryptPasswordEncoder passwordEncoder) {
         this.userRepository = userRepository;
         this.tokenRepository = tokenRepository;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @Override
@@ -33,7 +39,8 @@ public class UserServiceImpl implements UserService {
         User user = new User();
         user.setEmail(email);
         user.setName(name);
-        user.setPassword(password);
+        user.setPassword(passwordEncoder.encode(password));
+        user.setRoles(new ArrayList<>());
 
         return userRepository.save(user);
     }
@@ -45,11 +52,12 @@ public class UserServiceImpl implements UserService {
             throw new UserNotFoundException("user with email " +email+"not found");
         }
         User user = optionalUser.get();
-        if (user.getPassword().equals(password)) {
+        if (passwordEncoder.matches(password, user.getPassword())) {
             //login successful create token
             Token token = new Token();
             token.setUser(user);
-            token.setValue("bfvkjxclzknjch");
+            //DEPRECATED RandomStringUTILS
+            token.setValue(RandomStringUtils.randomAlphanumeric(128));
 
             //Date after 30 days code using Calendar
             Date currentDate = new Date();
@@ -66,12 +74,17 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public User validateToken(String tokenValue) {
-        return null;
+        //check if the token is present in DB,token is not deleted
+        //token's expiry time is greater than current time
+
+        Optional<Token> optionalToken = tokenRepository.findByValueAndIsDeletedAndExpiryDateGreaterThan(tokenValue, false, new Date());
+        return optionalToken.map(Token::getUser).orElse(null);
+
     }
 
     @Override
     public void logOut(String tokenValue) {
-        Optional<Token> optionalToken = tokenRepository.findByTokenValue(tokenValue);
+        Optional<Token> optionalToken = tokenRepository.findByValue(tokenValue);
         if (optionalToken.isEmpty()) {
            throw new RuntimeException("Token not found");
         }
